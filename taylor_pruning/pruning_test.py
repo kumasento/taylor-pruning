@@ -6,7 +6,7 @@ import functools
 import torch
 import torch.nn as nn
 
-from taylor_pruning.pruning import register_hooks
+from taylor_pruning.pruning import register_hooks, compute_taylor_criterion
 
 
 class TestPruning(unittest.TestCase):
@@ -66,7 +66,7 @@ class TestPruning(unittest.TestCase):
     class Flatten(nn.Module):
 
       def forward(self, x):
-        shape = torch.prod(torch.tensor(x.shape[1:])).item()
+        shape = torch.prod(torch.Tensor(x.shape[1:])).item()
         return x.view(-1, shape)
 
     class ConvNet(nn.Sequential):
@@ -99,6 +99,16 @@ class TestPruning(unittest.TestCase):
 
     self.assertEqual(set(act_map.keys()), set(['conv1', 'conv2', 'fc']))
     self.assertEqual(set(grad_map.keys()), set(['conv1', 'conv2', 'fc']))
+
+  def test_compute_taylor_criterion(self):
+    """ test the compute function """
+
+    act = torch.rand((32, 3, 28, 28))
+    grad = torch.rand((32, 3, 28, 28))
+
+    crit = compute_taylor_criterion(act, grad)
+    assert len(crit.shape) == 1
+    assert crit.shape[0] == 3  # number of channels
 
 
 if __name__ == '__main__':
