@@ -66,7 +66,7 @@ class TestPruning(unittest.TestCase):
     class Flatten(nn.Module):
 
       def forward(self, x):
-        shape = torch.prod(torch.Tensor(x.shape[1:])).item()
+        shape = torch.prod(torch.tensor(x.shape[1:])).item()
         return x.view(-1, shape)
 
     class ConvNet(nn.Sequential):
@@ -90,15 +90,22 @@ class TestPruning(unittest.TestCase):
 
     register_hooks(conv_net, act_map, grad_map)
 
-    x = torch.rand((32, 3, 32, 32))
-    y = conv_net(x)
     target = torch.LongTensor(32).random_(0, 10)
     criterion = nn.CrossEntropyLoss()
+
+    x = torch.rand((32, 3, 32, 32))
+    y = conv_net(x)
+    loss = criterion(y, target)
+    loss.backward()
+
+    x = torch.rand((32, 3, 32, 32))
+    y = conv_net(x)
     loss = criterion(y, target)
     loss.backward()
 
     self.assertEqual(set(act_map.keys()), set(['conv1', 'conv2', 'fc']))
     self.assertEqual(set(grad_map.keys()), set(['conv1', 'conv2', 'fc']))
+    self.assertEqual(act_map['conv1'].shape[0], 64)
 
   def test_compute_taylor_criterion(self):
     """ test the compute function """
