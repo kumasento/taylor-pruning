@@ -98,9 +98,7 @@ class TestPruning(unittest.TestCase):
     loss.backward()
 
     self.assertEqual(set(act_map.keys()), set(['conv1', 'conv2', 'fc']))
-    self.assertEqual(
-        set(grad_map.keys()), set(['conv1.weight', 'conv2.weight',
-                                   'fc.weight']))
+    self.assertEqual(set(grad_map.keys()), set(['conv1', 'conv2', 'fc']))
 
 
 if __name__ == '__main__':

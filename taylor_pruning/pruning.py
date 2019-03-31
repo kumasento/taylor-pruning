@@ -21,19 +21,15 @@ def get_act_hook(mod, inp, out, mod_name=None, act_map=None):
   act_map[mod_name] = out
 
 
-def get_grad_hook(grad, var_name=None, grad_map=None):
+def get_grad_hook(mod, grad_in, grad_out, mod_name=None, grad_map=None):
   """ The hook to collect gradient. """
-  assert isinstance(var_name, str)
+  assert isinstance(mod_name, str)
   assert isinstance(grad_map, dict)
 
-  grad_map[var_name] = grad
+  grad_map[mod_name] = grad_out
 
 
-def register_hooks(model,
-                   act_map,
-                   grad_map,
-                   param_name_pattern='weight',
-                   logger=None):
+def register_hooks(model, act_map, grad_map, logger=None):
   """ Register hooks on model to collect activations and
     gradients to act_map and grad_map respectively.
     
@@ -41,7 +37,6 @@ def register_hooks(model,
       model(nn.Module):
       act_map(dict): activation map
       grad_map(dict): gradient map
-      param_name_pattern(str): regex pattern for parameters to be registered
       logger(Logger): log information
   """
 
@@ -61,17 +56,5 @@ def register_hooks(model,
     logger.debug('Register forward hook for module "{}": {}'.format(name, mod))
     mod.register_forward_hook(
         functools.partial(get_act_hook, act_map=act_map, mod_name=name))
-
-    for var_name, var in mod.named_parameters():
-      # register hooks for variables to collect gradients
-      if re.search(param_name_pattern, var_name):
-        assert isinstance(var, Variable)
-
-        # NOTE: name of the parameter is prefixed by module name
-        var_name = name + '.' + var_name
-
-        logger.debug('Register hook for parameter "{}" of shape {}'.format(
-            var_name, var.shape))
-        var.register_hook(
-            functools.partial(
-                get_grad_hook, var_name=var_name, grad_map=grad_map))
+    mod.register_backward_hook(
+        functools.partial(get_grad_hook, grad_map=grad_map, mod_name=name))
