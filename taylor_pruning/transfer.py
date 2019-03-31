@@ -26,14 +26,23 @@ import taylor_pruning.utils as utils
 from taylor_pruning.model_runner import ModelRunner
 
 
-def set_require_grad(model, require_grad):
-  """ A helper function that sets the require_grad field
+def set_requires_grad(model, requires_grad):
+  """ A helper function that sets the requires_grad field
     of parameters of the given model. """
   for param in model.parameters():
-    param.require_grad = require_grad
+    param.requires_grad = requires_grad
 
 
-def replace_classifier(arch, model, dataset, freeze=False, init=True):
+# def init_module(mod):
+#   """ init the parameters of a given module """
+#   if isinstance(mod, nn.Linear) or isinstance(mod, nn.Conv2d):
+#     nn.init.kaiming_normal_(mod.weight)
+#     if mod.bias is not None:
+#       nn.init.zeros_(mod.bias)
+#   set_require_grad(mod, True)  # HACK: we need to restore the trainability
+
+
+def replace_classifier(arch, model, dataset, freeze=False):
   """ Replace the final classifier based on the dataset.
   
   Args:
@@ -50,32 +59,37 @@ def replace_classifier(arch, model, dataset, freeze=False, init=True):
   # https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
   num_classes = utils.get_num_classes(dataset)
   if freeze:
-    set_require_grad(model, False)
+    set_requires_grad(model, False)
 
   mod = None  # the module of the replaced classifier
   if arch.startswith('resnet'):
     in_features = model.fc.in_features
     model.fc = nn.Linear(in_features, num_classes)
     mod = model.fc
+
   elif arch == 'alexnet' or arch.startswith('vgg'):
     model.classifier[6] = nn.Linear(4096, num_classes)
-    mod = model.classifier[6]
+    mod = model.classifier
+    # HACK
+    for param in model.classifier.parameters():
+      param.requires_grad = True
+
   elif arch.startswith('squeezenet'):
     model.classifier[1] = nn.Conv2d(
         512, num_classes, kernel_size=(1, 1), stride=(1, 1))
     mod = model.classifier[1]
+
   elif arch.startswith('densenet'):
     model.classifier = nn.Linear(1024, num_classes)
     mod = model.classifier
+
   elif arch.startswith('mobilenet'):
     in_features = model.fc.in_features
     model.fc = nn.Linear(in_features, num_classes)
     mod = model.fc
+
   else:
     raise ValueError('ARCH={} cannot be recognized.'.format(arch))
-
-  if init:
-    nn.init.kaiming_normal_(mod.weight)
 
 
 class ModelTransfer(ModelRunner):

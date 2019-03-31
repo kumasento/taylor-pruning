@@ -107,6 +107,15 @@ class ModelRunner(object):
 
     print(s)
 
+  def print_trainable_parameters(self, model):
+    """ List all the trainable parameters """
+    s = 'Trainable Parameters:\n'
+    s += '--------------------------------\n'
+    for name, param in model.named_parameters():
+      if param.requires_grad:
+        s += '{:30s}: {}\n'.format(name, param.shape)
+    print(s)
+
   def validate_args(self, args):
     """ Do some validation before actual work starts. """
     assert isinstance(args.dataset, str)
@@ -151,6 +160,7 @@ class ModelRunner(object):
     logging.info('==> Started training, total epochs {}, start from {}'.format(
         epochs, self.args.start_epoch))
     self.print_optimizer(optimizer)
+    self.print_trainable_parameters(model)
 
     for epoch in range(self.args.start_epoch, epochs):
       # TODO(13/02/2019): learning rate adjustment
