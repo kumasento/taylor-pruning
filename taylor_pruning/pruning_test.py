@@ -2,11 +2,35 @@
 
 import unittest
 import functools
+import copy
 
 import torch
 import torch.nn as nn
 
-from taylor_pruning.pruning import register_hooks, compute_taylor_criterion
+from taylor_pruning.pruning import *
+
+
+class Flatten(nn.Module):
+
+  def forward(self, x):
+    shape = torch.prod(torch.tensor(x.shape[1:])).item()
+    return x.view(-1, shape)
+
+
+class ConvNet(nn.Sequential):
+  """ A very small CNN for testing. """
+
+  def __init__(self):
+    super().__init__()
+
+    self.add_module('conv1', nn.Conv2d(3, 32, 3, stride=1, padding=1))
+    self.add_module('relu1', nn.ReLU(inplace=True))
+    self.add_module('pool1', nn.MaxPool2d(2, 2))
+    self.add_module('conv2', nn.Conv2d(32, 32, 3, stride=1, padding=1))
+    self.add_module('relu2', nn.ReLU(inplace=True))
+    self.add_module('pool2', nn.MaxPool2d(2, 2))
+    self.add_module('flatten', Flatten())
+    self.add_module('fc', nn.Linear(8 * 8 * 32, 10))
 
 
 class TestPruning(unittest.TestCase):
@@ -62,28 +86,6 @@ class TestPruning(unittest.TestCase):
 
   def test_register_hooks(self):
     """ Test the register_hooks function from the pruning module """
-
-    class Flatten(nn.Module):
-
-      def forward(self, x):
-        shape = torch.prod(torch.tensor(x.shape[1:])).item()
-        return x.view(-1, shape)
-
-    class ConvNet(nn.Sequential):
-      """ A very small CNN for testing. """
-
-      def __init__(self):
-        super().__init__()
-
-        self.add_module('conv1', nn.Conv2d(3, 32, 3, stride=1, padding=1))
-        self.add_module('relu1', nn.ReLU(inplace=True))
-        self.add_module('pool1', nn.MaxPool2d(2, 2))
-        self.add_module('conv2', nn.Conv2d(32, 32, 3, stride=1, padding=1))
-        self.add_module('relu2', nn.ReLU(inplace=True))
-        self.add_module('pool2', nn.MaxPool2d(2, 2))
-        self.add_module('flatten', Flatten())
-        self.add_module('fc', nn.Linear(8 * 8 * 32, 10))
-
     conv_net = ConvNet()
     act_map = {}
     grad_map = {}
@@ -105,7 +107,8 @@ class TestPruning(unittest.TestCase):
 
     self.assertEqual(set(act_map.keys()), set(['conv1', 'conv2', 'fc']))
     self.assertEqual(set(grad_map.keys()), set(['conv1', 'conv2', 'fc']))
-    self.assertEqual(act_map['conv1'].shape[0], 64)
+    # even we call twice, the act_map will be refreshed
+    self.assertEqual(act_map['conv1'].shape[0], 32)
 
   def test_compute_taylor_criterion(self):
     """ test the compute function """
@@ -114,8 +117,45 @@ class TestPruning(unittest.TestCase):
     grad = torch.rand((32, 3, 28, 28))
 
     crit = compute_taylor_criterion(act, grad)
-    assert len(crit.shape) == 1
-    assert crit.shape[0] == 3  # number of channels
+    assert len(crit.shape) == 2
+    assert crit.shape[1] == 3  # number of channels
+
+  def test_rank_act(self):
+    """ test the rank_act function. """
+    crit_map = {  # two modules output 32 and 16 channels
+        'mod1': torch.rand(32),
+        'mod2': torch.rand(16)
+    }
+
+    ranking = rank_act(crit_map)
+    self.assertEqual(len(ranking), 32 + 16)
+    self.assertLess(ranking[0].crit, ranking[-1].crit)
+
+  def test_prune_by_taylor_criterion(self):
+    """ Test the prune_by_taylor_criterion function. """
+    conv_net = ConvNet()
+    act_map = {}
+    grad_map = {}
+
+    register_hooks(conv_net, act_map, grad_map)
+
+    target = torch.LongTensor(32).random_(0, 10)
+    criterion = nn.CrossEntropyLoss()
+
+    x = torch.rand((32, 3, 32, 32))
+    y = conv_net(x)
+    loss = criterion(y, target)
+    loss.backward()
+
+    crit_map = create_crit_map(act_map, grad_map)
+    prune_by_taylor_criterion(conv_net, crit_map)
+
+    # should be no problem
+    y = conv_net(x)
+    loss = criterion(y, target)
+    loss.backward()
+
+    # TODO: add test for the removed channels
 
 
 if __name__ == '__main__':

@@ -136,7 +136,7 @@ class ModelRunner(object):
         checkpoint_file_name=checkpoint_file_name,
         **kwargs)
 
-  def train(self, model, **kwargs):
+  def train(self, model, load_optim=True, **kwargs):
     """ Simply train the model with provided arguments. """
     if torch.cuda.is_available():
       model.cuda()  # in case the model is not on CUDA yet.
@@ -152,7 +152,7 @@ class ModelRunner(object):
         weight_decay=self.args.weight_decay)
 
     # TODO: move this code somewhere else
-    if self.args.resume:
+    if load_optim and self.args.resume:
       checkpoint = torch.load(self.args.resume)
       if 'optimizer' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -189,22 +189,22 @@ class ModelRunner(object):
           self.criterion,
           print_freq=self.args.print_freq)
 
-      # Append message to Logger
-      self.logger.append(
-          [self.state['lr'], train_loss, 0.0, val_loss, train_acc, val_acc])
-
       # Update best accuracy
       is_best = val_acc > best_acc
       best_acc = max(val_acc, best_acc)
 
-      checkpoint_state = {
-          'epoch': epoch + 1,
-          'state_dict': model.state_dict(),
-          'acc': val_acc,
-          'best_acc': best_acc,
-          'optimizer': optimizer.state_dict(),
-      }
-      utils.save_checkpoint(checkpoint_state, is_best, self.args.checkpoint)
+      if self.args.checkpoint:
+        # Append message to Logger
+        self.logger.append(
+            [self.state['lr'], train_loss, 0.0, val_loss, train_acc, val_acc])
+        checkpoint_state = {
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'acc': val_acc,
+            'best_acc': best_acc,
+            'optimizer': optimizer.state_dict(),
+        }
+        utils.save_checkpoint(checkpoint_state, is_best, self.args.checkpoint)
 
     # Finalising
     self.logger.close()

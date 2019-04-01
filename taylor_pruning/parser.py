@@ -125,4 +125,22 @@ def create_cli_parser(prog=None):
       default=False,
       help='Freeze the CONV feature layers while transferring.')
 
+  ##########################
+  # Taylor Pruning
+  parser.add_argument(
+      '--num-channels-per-prune',
+      type=int,
+      default=1,
+      help='Number of channels per pruning iteration')
+  parser.add_argument(
+      '--crit-batch',
+      type=int,
+      default=32,
+      help='Batch size for computing the criterion.')
+  parser.add_argument(
+      '--num-prune-iters',
+      type=int,
+      default=1,
+      help='Number of pruning iterations.')
+
   return parser

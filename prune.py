@@ -23,10 +23,7 @@ def main():
   # logging.info('==> Validating the loaded model ...')
   # pruner.validate(model)
 
-  logging.info('==> Collecting gradients ...')
-  crit_map = pruner.compute_taylor_criterion(
-      model, use_cuda=torch.cuda.is_available())
-  print(crit_map)
+  pruner.prune_loop(model)
 
 
 if __name__ == '__main__':
