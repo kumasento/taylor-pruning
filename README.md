@@ -9,8 +9,12 @@ This project is built on PyTorch.
 Packages required are managed by Anaconda.
 
 ```shell
+# install required packages
 conda env create -f environment.yml
 conda activate taylor-pruning
+
+# install this repository
+pip install -e .
 ```
 
 ## Usage
