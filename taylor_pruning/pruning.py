@@ -217,10 +217,15 @@ def prune_by_taylor_criterion(model, crit_map, num_channels_per_prune=1):
   # and build the mod map
   act_chl = []
   mod_map = OrderedDict()
+  par_map = OrderedDict()  # record the parent module name
   mod_out = OrderedDict()
   for name, mod in model.named_modules():
+    mod_map[name] = mod
+    for child_name, child in mod.named_children():
+      full_name = child_name if not name else '{}.{}'.format(name, child_name)
+      par_map[full_name] = name
+
     if isinstance(mod, nn.Conv2d) or isinstance(mod, nn.Linear):
-      mod_map[name] = mod
       mod_out[name] = get_mod_channels(mod, out=True)
       if name in chl_map:
         act_chl.append((name, chl_map[name]))
@@ -263,7 +268,9 @@ def prune_by_taylor_criterion(model, crit_map, num_channels_per_prune=1):
       mod_.bias.data = mod.bias[ouc]  # pruned biases
 
     # NOTE: we replaced the module here
-    model._modules[name] = mod_
+    par_mod = mod_map[par_map[name]]
+    par_mod._modules[name.split('.')[-1]] = mod_
+    del mod  # explicitly remove this replaced module
 
   return model
 
@@ -274,7 +281,7 @@ class ModelPruner(ModelTransfer):
   def __init__(self, args):
     super().__init__(args)
 
-    self.base_dir = args.checkpoint    
+    self.base_dir = args.checkpoint
     if isinstance(self.base_dir, str):
       os.makedirs(self.base_dir, exist_ok=True)
 
@@ -369,7 +376,8 @@ class ModelPruner(ModelTransfer):
           prune_iter, self.args.num_prune_iters))
 
       # create the checkpoint directory
-      checkpoint = os.path.join(self.base_dir, 'prune_iter_{}'.format(prune_iter))
+      checkpoint = os.path.join(self.base_dir,
+                                'prune_iter_{}'.format(prune_iter))
       os.makedirs(checkpoint, exist_ok=True)
 
       # declare the new checkpoint
