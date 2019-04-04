@@ -100,6 +100,9 @@ def compute_taylor_criterion(act, grad):
 
 def rank_act(crit_map):
   """ Rank channels in activations by their criterion.
+
+    NOTE: All the modules that are affected by replacement should be
+      returned by this function.
   
     Args:
       crit_map(dict): computed criterion
@@ -181,7 +184,10 @@ def clone_module(mod, in_channels, out_channels):
   return mod_
 
 
-def prune_by_taylor_criterion(model, crit_map, num_channels_per_prune=1):
+def prune_by_taylor_criterion(model,
+                              crit_map,
+                              num_channels_per_prune=1,
+                              logger=None):
   """ Prune the given model by the crit_map.
 
   NOTE: need update for batch norm
@@ -200,13 +206,20 @@ def prune_by_taylor_criterion(model, crit_map, num_channels_per_prune=1):
   assert isinstance(num_channels_per_prune, int)
   assert num_channels_per_prune >= 1
 
+  if logger is None:
+    logger = module_logger
+
+  # compute the ranking
   ranking = rank_act(crit_map)
-  to_prune = ranking[:num_channels_per_prune]
+  chl_map = OrderedDict()
+  for tup in ranking:  # initialise every module name
+    chl_map[tup.mod_name] = []
 
   # figure out all the channels to be pruned
-  chl_map = OrderedDict()
-  for tup in ranking:
-    chl_map[tup.mod_name] = []
+  cls_name = list(model.named_modules())[-1][0]  # name of the classifier module
+  # NOTE:  we should skip the last classifier
+  ranking = [rnk for rnk in ranking if rnk.mod_name != cls_name]
+  to_prune = ranking[:num_channels_per_prune]
   for tup in to_prune:
     if tup.mod_name not in chl_map:
       chl_map[tup.mod_name] = [tup.channel]
@@ -402,7 +415,8 @@ class ModelPruner(ModelTransfer):
     model = prune_by_taylor_criterion(
         model,
         crit_map,
-        num_channels_per_prune=self.args.num_channels_per_prune)
+        num_channels_per_prune=self.args.num_channels_per_prune,
+        logger=logger)
     print(model)
 
     # train and validate this model
