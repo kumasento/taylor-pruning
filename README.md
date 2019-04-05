@@ -1,5 +1,7 @@
 # taylor-pruning
 
+![](https://travis-ci.com/kumasento/taylor-pruning.svg?branch=master)
+
 Reproducing ICLR'17 paper _Pruning Convolutional Neural Networks for Resource Efficient Inference_ ([link](https://arxiv.org/abs/1611.06440)).
 
 This project is built on PyTorch.
