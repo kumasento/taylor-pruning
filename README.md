@@ -1,6 +1,8 @@
 # taylor-pruning
 
 ![](https://travis-ci.com/kumasento/taylor-pruning.svg?branch=master)
+[![codecov](https://codecov.io/gh/kumasento/taylor-pruning/branch/master/graph/badge.svg)](https://codecov.io/gh/kumasento/taylor-pruning)
+
 
 Reproducing ICLR'17 paper _Pruning Convolutional Neural Networks for Resource Efficient Inference_ ([link](https://arxiv.org/abs/1611.06440)).
 
