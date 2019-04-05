@@ -18,4 +18,4 @@ install:
   - pip install .
 
 script:
-  - py.test --cov-report=xml --cov=taylor-pruning 
+  - py.test --cov-report=xml --cov=taylor_pruning 
