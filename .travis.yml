@@ -14,7 +14,8 @@ before_install:
 install:
   - conda env create -f environment.yml
   - source activate taylor-pruning
+  - pip install codecov pytest-cov # coverage test
   - pip install .
 
 script:
-  - pytest
+  - py.test --cov-report=xml --cov=taylor-pruning 
