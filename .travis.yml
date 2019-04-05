@@ -19,3 +19,6 @@ install:
 
 script:
   - py.test --cov-report=xml --cov=taylor_pruning 
+
+after_success:
+  - codecov
