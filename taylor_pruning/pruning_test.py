@@ -157,6 +157,31 @@ class TestPruning(unittest.TestCase):
 
     # TODO: add test for the removed channels
 
+  def test_get_channels_to_prune(self):
+    """ Test whether the get_channels_to_prune function works well. """
+
+    ranking = [
+        ActRank('a', 0, 0.1),
+        ActRank('a', 1, 0.2),
+        ActRank('b', 0, 0.3),
+        ActRank('b', 1, 0.35),
+        ActRank('c', 0, 0.4),
+        ActRank('c', 1, 0.6),
+        ActRank('d', 0, 0.7),
+        ActRank('d', 1, 0.8),
+        ActRank('d', 2, 0.91),
+    ]
+
+    # Now, we remove 3 channels, and the threshold is 1, so that only the first
+    # act of each module will be removed.
+    # also 'c' should be skipped
+    to_prune = get_channels_to_prune(
+        ranking, 3, least_num_channels=1, excludes=['c'])
+
+    self.assertEqual(to_prune[0], ranking[0])
+    self.assertEqual(to_prune[1], ranking[2])
+    self.assertEqual(to_prune[2], ranking[6])
+
 
 if __name__ == '__main__':
   unittest.main()

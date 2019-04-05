@@ -8,7 +8,7 @@ import time
 import functools
 import logging
 import copy
-from collections import namedtuple, OrderedDict
+from collections import namedtuple, OrderedDict, Counter
 module_logger = logging.getLogger('pruning')
 module_logger.setLevel(logging.INFO)
 
@@ -19,6 +19,8 @@ from torch.autograd import Variable
 
 from taylor_pruning.transfer import ModelTransfer
 from taylor_pruning.utils import AverageMeter
+
+ActRank = namedtuple('ActRank', ['mod_name', 'channel', 'crit'])
 
 
 def get_act_hook(mod, inp, out, mod_name=None, act_map=None):
@@ -111,7 +113,6 @@ def rank_act(crit_map):
       sorted in increasing order
   """
   ranking = []
-  ActRank = namedtuple('ActRank', ['mod_name', 'channel', 'crit'])
 
   for mod_name in crit_map:
     crit = crit_map[mod_name].detach().cpu().numpy().tolist()
@@ -167,6 +168,8 @@ def update_mod_channels(mod, channels, out=False):
 
 
 def clone_module(mod, in_channels, out_channels):
+  """ Create a new nn.Conv2d or nn.Linear module based on
+    the original module provided. """
   if isinstance(mod, nn.Conv2d):
     mod_ = nn.Conv2d(
         in_channels,
@@ -182,6 +185,47 @@ def clone_module(mod, in_channels, out_channels):
     raise TypeError('Cannot recognise module with type: {}'.format(type(mod)))
 
   return mod_
+
+
+def get_channels_to_prune(ranking,
+                          num_channels,
+                          least_num_channels=8,
+                          excludes=None):
+  """ Return the channels that will be pruned. 
+  
+  Args:
+    ranking(list): a list of ActRank, already SORTED.
+    num_channels(int): the amount of channels that will be pruned.
+    least_num_channels(int): at least leave each activation
+      this amount of channels
+    excludes(list): a list of mod names that will be excluded
+      for pruning.
+  Returns:
+    A list of ActRank, representing channels to be pruned.
+  """
+  assert isinstance(least_num_channels, int) and least_num_channels >= 0
+
+  # compute the number of channels for each activation
+  # labelled by mod_name
+  nc_map = Counter([rnk.mod_name for rnk in ranking])
+
+  if excludes is None:
+    excludes = []
+
+  cnt = 0
+  to_prune = []
+  for rk in ranking:
+    if nc_map[rk.mod_name] <= least_num_channels or rk.mod_name in excludes:
+      continue
+
+    to_prune.append(rk)
+    nc_map[rk.mod_name] -= 1  # update the remaining number of channels
+
+    cnt += 1
+    if cnt >= num_channels:
+      break
+
+  return to_prune
 
 
 def prune_by_taylor_criterion(model,
@@ -217,9 +261,11 @@ def prune_by_taylor_criterion(model,
 
   # figure out all the channels to be pruned
   cls_name = list(model.named_modules())[-1][0]  # name of the classifier module
+
   # NOTE:  we should skip the last classifier
   ranking = [rnk for rnk in ranking if rnk.mod_name != cls_name]
-  to_prune = ranking[:num_channels_per_prune]
+  to_prune = get_channels_to_prune(ranking, num_channels_per_prune)
+
   for tup in to_prune:
     if tup.mod_name not in chl_map:
       chl_map[tup.mod_name] = [tup.channel]
