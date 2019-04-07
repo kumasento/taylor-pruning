@@ -65,6 +65,7 @@ else:
 Download an ImageNet pre-trained model from TorchVision and fit its weights to the target dataset.
 
 ```shell
+# VGG-16 
 python transfer.py \
   -a vgg16 \
   -c PATH/TO/CHECKPOINT \
@@ -76,15 +77,22 @@ python transfer.py \
   --wd 1e-4 \
   --pretrained \
   --gpu-id 0
+
+# ResNet-50
+python transfer.py -a resnet50 -c PATH/TO/CHECKPOINT \
+  -d cub200 --dataset-dir PATH/TO/DATASET \
+  --epochs 90 --schedule 30 60 --lr 1e-3 \
+  --train-batch 32 --wd 1e-4 --pretrained --gpu-id 0
 ```
 
 Above is the recipe to transfer an ImageNet pre-trained VGG-16 model to the CUB-200 dataset using the same hyperparameters as the paper: 60 epochs, 1e-4 fixed learning rate. 32 batch size and 1e-4 weight decay are deduced from the setting of the fine-tuning after pruning part of the paper.
 
 The models transferred are listed as follows:
 
-| Model  | Dataset | Top-1 Acc. (%) | Download                                                                     |
-| ------ | ------- | -------------- | ---------------------------------------------------------------------------- |
-| VGG-16 | CUB-200 | 76.355         | [link](https://s3.amazonaws.com/taylor-pruning/vgg16_cub200_transfer.tar.gz) |
+| Model     | Dataset | Top-1 Acc. (%) | Download                                                                        |
+|-----------|---------|----------------|---------------------------------------------------------------------------------|
+| VGG-16    | CUB-200 | 76.355         | [link](https://s3.amazonaws.com/taylor-pruning/vgg16_cub200_transfer.tar.gz)    |
+| ResNet-50 | CUB-200 | 81.895         | [link](https://s3.amazonaws.com/taylor-pruning/resnet50_cub200_transfer.tar.gz) |
 
 ### Prune a model
 
