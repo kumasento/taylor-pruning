@@ -12,6 +12,7 @@ import warnings
 import sys
 import os
 import logging
+from collections import OrderedDict
 logger = logging.getLogger('utils')
 logger.setLevel(logging.DEBUG)
 
@@ -105,6 +106,59 @@ def load_model(arch,
     model.load_state_dict(state_dict)
 
   return model
+
+
+#######################################
+# Module                              #
+#######################################
+
+
+def find_in_parent(mod, par):
+  """ Get the index of mod in par.children.
+  
+  Args:
+    mod(nn.Module)
+    par(nn.Module)
+  Returns:
+    An index, -1 indicates not found.
+  """
+  assert isinstance(mod, nn.Module)
+  assert isinstance(par, nn.Module)
+
+  # locate mod in par.children
+  mods = list(par.children())
+
+  for i, mod_ in enumerate(mods):
+    if mod_ is mod:
+      return i
+
+  return -1
+
+
+def insert_after(ins, mod, par, name_suffix=None):
+  """ Insert a module after a given module.
+  
+  Args:
+    ins(nn.Module): module to insert
+    mod(nn.Module):
+    par(nn.Module): parent module of mod
+    name_suffix(str): suffix of the module to be inserted
+  Returns:
+    None
+  """
+  idx = find_in_parent(mod, par)
+  if idx == -1:
+    raise ValueError('module {} (mod) is not a child of {} (par).'.format(
+        mod, par))
+
+  mods = list(par._modules.items())
+  if name_suffix is None:  # generate a new name
+    name_suffix = 'ins'
+  assert isinstance(name_suffix, str)
+  name = mods[idx][0] + '_' + name_suffix
+
+  mods.insert(idx + 1, (name, ins))  # insert after idx
+  par._modules = OrderedDict(mods)
 
 
 #######################################
