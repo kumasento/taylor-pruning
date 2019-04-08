@@ -4,9 +4,11 @@ import unittest
 import functools
 import copy
 
+import numpy as np
 import torch
 import torch.nn as nn
 
+from taylor_pruning.mask import ActMask
 from taylor_pruning.pruning import *
 
 
@@ -24,9 +26,11 @@ class ConvNet(nn.Sequential):
     super().__init__()
 
     self.add_module('conv1', nn.Conv2d(3, 32, 3, stride=1, padding=1))
+    self.add_module('bn1', nn.BatchNorm2d(32))
     self.add_module('relu1', nn.ReLU(inplace=True))
     self.add_module('pool1', nn.MaxPool2d(2, 2))
     self.add_module('conv2', nn.Conv2d(32, 32, 3, stride=1, padding=1))
+    self.add_module('bn2', nn.BatchNorm2d(32))
     self.add_module('relu2', nn.ReLU(inplace=True))
     self.add_module('pool2', nn.MaxPool2d(2, 2))
     self.add_module('flatten', Flatten())
@@ -148,14 +152,37 @@ class TestPruning(unittest.TestCase):
     loss.backward()
 
     crit_map = create_crit_map(act_map, grad_map)
-    prune_by_taylor_criterion(conv_net, crit_map)
+    prune_by_taylor_criterion(conv_net, crit_map, num_channels_per_prune=16)
 
-    # should be no problem
-    y = conv_net(x)
-    loss = criterion(y, target)
+    # count number of pruned channels
+    nz = 0
+    for mod in conv_net.modules():
+      if isinstance(mod, ActMask):
+        nz += np.count_nonzero(mod.mask.cpu().numpy() == 0)
+    self.assertEqual(nz, 16)
+
+    y2 = conv_net(x)
+    self.assertFalse(torch.allclose(y, y2))  # results are different
+
+    # Try to prune again
+    act_map = {}
+    grad_map = {}
+    register_hooks(conv_net, act_map, grad_map)
+    y2 = conv_net(x)
+    loss = criterion(y2, target)
     loss.backward()
 
-    # TODO: add test for the removed channels
+    crit_map = create_crit_map(act_map, grad_map)
+    prune_by_taylor_criterion(conv_net, crit_map, num_channels_per_prune=16)
+    y3 = conv_net(x)
+    self.assertFalse(torch.allclose(y2, y3))  # results are different
+
+    # find collect all zeros from all masks
+    nz = 0
+    for mod in conv_net.modules():
+      if isinstance(mod, ActMask):
+        nz += np.count_nonzero(mod.mask.cpu().numpy() == 0)
+    self.assertEqual(nz, 32)
 
   def test_get_channels_to_prune(self):
     """ Test whether the get_channels_to_prune function works well. """
@@ -175,12 +202,13 @@ class TestPruning(unittest.TestCase):
     # Now, we remove 3 channels, and the threshold is 1, so that only the first
     # act of each module will be removed.
     # also 'c' should be skipped
-    to_prune = get_channels_to_prune(
+    pc_map = get_channels_to_prune(
         ranking, 3, least_num_channels=1, excludes=['c'])
 
-    self.assertEqual(to_prune[0], ranking[0])
-    self.assertEqual(to_prune[1], ranking[2])
-    self.assertEqual(to_prune[2], ranking[6])
+    self.assertEqual(pc_map['a'], set([0]))
+    self.assertEqual(pc_map['b'], set([0]))
+    self.assertEqual(pc_map['c'], set())
+    self.assertEqual(pc_map['d'], set([0]))
 
 
 if __name__ == '__main__':

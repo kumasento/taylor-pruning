@@ -15,9 +15,15 @@ class ActMask(nn.Module):
     assert num_channels >= 1
 
     self.num_channels = num_channels
-    self.mask = nn.Parameter(torch.ones(num_channels, requires_grad=False))
+    self.mask = nn.Parameter(torch.ones(num_channels), requires_grad=False)
 
   def forward(self, x):
     """ Element-wise multiply mask with x. """
-    mask = self.mask.view([1, x.shape[1], 1, 1])
+    mask = self.mask
+    if len(x.shape) == 4:
+      mask = mask.view([x.shape[1], 1, 1])
     return torch.mul(x, mask)
+
+  def extra_repr(self):
+    s = '{num_channels}'
+    return s.format(**self.__dict__)

@@ -18,7 +18,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from taylor_pruning.transfer import ModelTransfer
-from taylor_pruning.utils import AverageMeter
+from taylor_pruning.utils import *
 from taylor_pruning.mask import ActMask
 
 ActRank = namedtuple('ActRank', ['mod_name', 'channel', 'crit'])
@@ -116,7 +116,11 @@ def rank_act(crit_map):
   ranking = []
 
   for mod_name in crit_map:
-    crit = crit_map[mod_name].detach().cpu().numpy().tolist()
+    crit = crit_map[mod_name].detach().cpu().numpy()
+    crit = np.squeeze(crit)
+    assert len(crit.shape) == 1
+
+    crit = crit.tolist()
     # generate the list of tuple for every module
     ranking.extend(list([ActRank(mod_name, i, c) for i, c in enumerate(crit)]))
 
@@ -190,6 +194,8 @@ def clone_module(mod, in_channels, out_channels):
 
 def get_channels_to_prune(ranking,
                           num_channels,
+                          mod_map=None,
+                          par_map=None,
                           least_num_channels=8,
                           excludes=None):
   """ Return the channels that will be pruned. 
@@ -197,36 +203,68 @@ def get_channels_to_prune(ranking,
   Args:
     ranking(list): a list of ActRank, already SORTED.
     num_channels(int): the amount of channels that will be pruned.
+    mod_map(dict): mapping from module name to module
+    par_map(dict): mapping from module name to its parent's name
     least_num_channels(int): at least leave each activation
       this amount of channels
     excludes(list): a list of mod names that will be excluded
       for pruning.
   Returns:
-    A list of ActRank, representing channels to be pruned.
+    A map from mod name to a list of channel indices
   """
   assert isinstance(least_num_channels, int) and least_num_channels >= 0
 
-  # compute the number of channels for each activation
-  # labelled by mod_name
-  nc_map = Counter([rnk.mod_name for rnk in ranking])
+  # map from mod_name to channels
+  rc_map = {}
+  pc_map = {}
+
+  # iterate rankings to initialise rc_map
+  for rank in ranking:
+    if rank.mod_name not in rc_map:
+      rc_map[rank.mod_name] = set()
+    rc_map[rank.mod_name].add(rank.channel)  # insert all channels appeared
+
+    if rank.mod_name not in pc_map:
+      pc_map[rank.mod_name] = set()
+
+  # update rc_map by existing masks
+  # when mod_map and par_map are provided
+  if mod_map is not None and par_map is not None:
+    for mod_name in rc_map:
+      mod = mod_map[mod_name]
+      par = mod_map[par_map[mod_name]]
+
+      act_mask = find_act_mask(mod, par)
+      # use act_mask to update the set of remaining channels
+      if act_mask is not None:
+        mask_val = act_mask.mask.cpu().numpy()
+        rc_map[mod_name] = set(np.nonzero(mask_val)[0].tolist())
+        pc_map[mod_name] = set(np.nonzero(mask_val == 0)[0].tolist())
 
   if excludes is None:
     excludes = []
 
   cnt = 0
-  to_prune = []
   for rk in ranking:
-    if nc_map[rk.mod_name] <= least_num_channels or rk.mod_name in excludes:
+    # this channel has been removed
+    if rk.channel not in rc_map[rk.mod_name]:
+      continue
+    # remaining channels are less than the threshold
+    if len(rc_map[rk.mod_name]) <= least_num_channels:
+      continue
+    # this module is excluded
+    if rk.mod_name in excludes:
       continue
 
-    to_prune.append(rk)
-    nc_map[rk.mod_name] -= 1  # update the remaining number of channels
+    # update
+    rc_map[rk.mod_name].remove(rk.channel)
+    pc_map[rk.mod_name].add(rk.channel)
 
     cnt += 1
     if cnt >= num_channels:
       break
 
-  return to_prune
+  return pc_map
 
 
 def find_act_mask(mod, par):
@@ -240,15 +278,12 @@ def find_act_mask(mod, par):
   """
   # locate mod in par.children
   mods = list(par.children())
-
-  for i, mod_ in enumerate(mods):
-    if mod_ is mod:
-      if i < len(mods) - 1 and isinstance(mods[i + 1], ActMask):
-        return mods[i + 1]
-      else:
-        return None
-
-  raise ValueError('mod {} is not a children of {}.'.format(mod, par))
+  idx = find_in_parent(mod, par)  # locate the mod
+  if idx == -1:
+    raise ValueError('mod {} is not a children of {}.'.format(mod, par))
+  if idx < len(mods) - 1 and isinstance(mods[idx + 1], ActMask):
+    return mods[idx + 1]
+  return None
 
 
 def insert_or_update_act_mask(mod, par, ouc):
@@ -257,14 +292,20 @@ def insert_or_update_act_mask(mod, par, ouc):
   Args:
     mod(nn.Module):
     par(nn.Module): parent module of mod
-    ouc(list): a list of channel indices to be remained
+    ouc(list): a list of channel indices to be removed
   Returns:
     None
   """
   act_mask = find_act_mask(mod, par)
+
+  # create the mask module
   if act_mask is None:
     num_channels = get_mod_channels(mod, out=True)
     act_mask = ActMask(num_channels)
+    insert_after(act_mask, mod, par, name_suffix='mask')
+
+  # update the mask value
+  act_mask.mask.data[ouc] = 0.0
 
 
 def prune_by_taylor_criterion(model,
@@ -292,77 +333,60 @@ def prune_by_taylor_criterion(model,
   if logger is None:
     logger = module_logger
 
-  # compute the ranking
-  ranking = rank_act(crit_map)
-  chl_map = OrderedDict()
-  for tup in ranking:  # initialise every module name
-    chl_map[tup.mod_name] = []
-
-  # figure out all the channels to be pruned
-  cls_name = list(model.named_modules())[-1][0]  # name of the classifier module
-
-  # NOTE:  we should skip the last classifier
-  ranking = [rnk for rnk in ranking if rnk.mod_name != cls_name]
-  to_prune = get_channels_to_prune(ranking, num_channels_per_prune)
-
-  for tup in to_prune:
-    if tup.mod_name not in chl_map:
-      chl_map[tup.mod_name] = [tup.channel]
-    else:
-      chl_map[tup.mod_name].append(tup.channel)
-
-  # reorder the channel map by sequence in model
-  # and build the mod map
-  act_chl = []
+  # build mod_map and par_map
   mod_map = OrderedDict()
   par_map = OrderedDict()  # record the parent module name
-  mod_out = OrderedDict()
   for name, mod in model.named_modules():
     mod_map[name] = mod
     for child_name, child in mod.named_children():
       full_name = child_name if not name else '{}.{}'.format(name, child_name)
       par_map[full_name] = name
 
-    if isinstance(mod, nn.Conv2d) or isinstance(mod, nn.Linear):
-      mod_out[name] = get_mod_channels(mod, out=True)
-      if name in chl_map:
-        act_chl.append((name, chl_map[name]))
-  del chl_map
+  # compute the ranking
+  ranking = rank_act(crit_map)
+  cls_name = list(model.named_modules())[-1][0]  # name of the classifier module
+  pc_map = get_channels_to_prune(
+      ranking,
+      num_channels_per_prune,
+      mod_map=mod_map,
+      par_map=par_map,
+      excludes=[cls_name])
 
   # iterate every activation
   # in each iteration, we remove those channels that
   # are marked to be pruned, by creating a new Conv2d
   # or Linear model and migrate the weights to the new
   # model.
-  for i, (name, channels_to_prune) in enumerate(act_chl):
+  for i, (name, channels_to_prune) in enumerate(pc_map.items()):
     mod = mod_map[name]
-    pre = mod_map[act_chl[i - 1][0]] if i > 0 else None
     assert isinstance(mod, nn.Conv2d) or isinstance(mod, nn.Linear)
 
-    # collect the number of channels from the module
-    # that outputs the current activation.
-    in_channels = get_mod_channels(mod, out=False)
-    out_channels = get_mod_channels(mod, out=True)
-
-    # decide the channels will be remained
-    ouc = [x for x in range(out_channels) if x not in act_chl[i][1]]
-    if i == 0:
-      inc = range(in_channels)
-    else:
-      # HACK: the interface between CONV-FC is hard to handle
-      if isinstance(mod, nn.Linear) and isinstance(pre, nn.Conv2d):
-        img_size = in_channels // mod_out[act_chl[i - 1][0]]
-        inc = np.arange(in_channels).reshape((-1, img_size))
-        inc_ = []
-        for x in range(inc.shape[0]):
-          if x not in act_chl[i - 1][1]:
-            inc_.extend(inc[x, :].tolist())
-        inc = inc_
-      else:
-        inc = [x for x in range(in_channels) if x not in act_chl[i - 1][1]]
+    insert_or_update_act_mask(mod, mod_map[par_map[name]],
+                              list(channels_to_prune))
 
     # NOTE: this is an older module replacement approach. We now prefer
     #   adding mask modules
+    # collect the number of channels from the module
+    # that outputs the current activation.
+    # in_channels = get_mod_channels(mod, out=False)
+    # out_channels = get_mod_channels(mod, out=True)
+    #
+    # pre = mod_map[act_chl[i - 1][0]] if i > 0 else None
+    # ouc = [x for x in range(out_channels) if x not in act_chl[i][1]]
+    # if i == 0:
+    #   inc = range(in_channels)
+    # else:
+    #   # HACK: the interface between CONV-FC is hard to handle
+    #   if isinstance(mod, nn.Linear) and isinstance(pre, nn.Conv2d):
+    #     img_size = in_channels // mod_out[act_chl[i - 1][0]]
+    #     inc = np.arange(in_channels).reshape((-1, img_size))
+    #     inc_ = []
+    #     for x in range(inc.shape[0]):
+    #       if x not in act_chl[i - 1][1]:
+    #         inc_.extend(inc[x, :].tolist())
+    #     inc = inc_
+    #   else:
+    #     inc = [x for x in range(in_channels) if x not in act_chl[i - 1][1]]
     # mod_ = clone_module(mod, len(inc), len(ouc))
     # mod_.weight.data = mod.weight[ouc, :][:, inc]  # pruned weights
     # if mod_.bias is not None:

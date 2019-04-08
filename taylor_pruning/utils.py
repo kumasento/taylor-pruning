@@ -135,13 +135,14 @@ def find_in_parent(mod, par):
   return -1
 
 
-def insert_after(ins, mod, par, name=None):
+def insert_after(ins, mod, par, name_suffix=None):
   """ Insert a module after a given module.
   
   Args:
     ins(nn.Module): module to insert
     mod(nn.Module):
     par(nn.Module): parent module of mod
+    name_suffix(str): suffix of the module to be inserted
   Returns:
     None
   """
@@ -151,9 +152,10 @@ def insert_after(ins, mod, par, name=None):
         mod, par))
 
   mods = list(par._modules.items())
-  if name is None:  # generate a new name
-    name = mods[idx][0] + '_ins'
-  assert isinstance(name, str)
+  if name_suffix is None:  # generate a new name
+    name_suffix = 'ins'
+  assert isinstance(name_suffix, str)
+  name = mods[idx][0] + '_' + name_suffix
 
   mods.insert(idx + 1, (name, ins))  # insert after idx
   par._modules = OrderedDict(mods)
