@@ -13,6 +13,7 @@ module_logger = logging.getLogger('pruning')
 module_logger.setLevel(logging.INFO)
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -494,6 +495,8 @@ class ModelPruner(ModelTransfer):
     if logger is None:
       logger = module_logger
 
+    total_num_channels_pruned = 0
+
     for prune_iter in range(self.args.num_prune_iters):
       logger.info('==> Running pruning iteration [{:3d}/{:3d}] ...'.format(
           prune_iter, self.args.num_prune_iters))
@@ -508,9 +511,20 @@ class ModelPruner(ModelTransfer):
       # NOTE: this logger is only used for the internal logic of training
       self.logger = self.get_logger(self.args)
 
-      model = self.prune(model, use_cuda=use_cuda, logger=logger)
+      model = self.prune(
+          model,
+          total_num_channels_pruned=total_num_channels_pruned,
+          num_channels_per_prune=self.args.num_channels_per_prune,
+          use_cuda=use_cuda,
+          logger=logger)
+      total_num_channels_pruned += self.args.num_channels_per_prune
 
-  def prune(self, model, use_cuda=True, logger=None):
+  def prune(self,
+            model,
+            total_num_channels_pruned=0,
+            num_channels_per_prune=0,
+            use_cuda=True,
+            logger=None):
     """ A prune round. """
     if logger is None:
       logger = module_logger
@@ -525,9 +539,14 @@ class ModelPruner(ModelTransfer):
     model = prune_by_taylor_criterion(
         model,
         crit_map,
-        num_channels_per_prune=self.args.num_channels_per_prune,
+        num_channels_per_prune=num_channels_per_prune,
         logger=logger)
+
+    total_num_channels_pruned += num_channels_per_prune
+    logger.info('==> Pruned model')
     print(model)
+    print(self.get_mask_status(model))
+    self.sanity_check(model, total_num_channels_pruned)
 
     # train and validate this model
     logger.info('==> Fine-tuning the model ...')
@@ -535,3 +554,22 @@ class ModelPruner(ModelTransfer):
     self.validate(model)
 
     return model
+
+  def sanity_check(self, model, total_num_channels_pruned):
+    """ Check whether pruning runs correctly. """
+    df = self.get_mask_status(model)
+
+    if df['num_pruned'].sum() != total_num_channels_pruned:
+      raise RuntimeError(
+          'Number of pruned channels {} does not equal to required {}'.format(
+              df['num_pruned'].sum(), total_num_channels_pruned))
+
+  def get_mask_status(self, model):
+    """ Print the status of each mask. """
+    cols = ['name', 'num_pruned']
+    data = []
+    for name, mod in model.named_modules():
+      if isinstance(mod, ActMask):
+        data.append([name, np.count_nonzero(mod.mask.cpu().numpy() == 0)])
+
+    return pd.DataFrame(data, columns=cols)
