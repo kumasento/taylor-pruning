@@ -19,6 +19,7 @@ from torch.autograd import Variable
 
 from taylor_pruning.transfer import ModelTransfer
 from taylor_pruning.utils import AverageMeter
+from taylor_pruning.mask import ActMask
 
 ActRank = namedtuple('ActRank', ['mod_name', 'channel', 'crit'])
 
@@ -228,6 +229,44 @@ def get_channels_to_prune(ranking,
   return to_prune
 
 
+def find_act_mask(mod, par):
+  """ Find the ActMask followed by mod in its parent children.
+
+  Args:
+    mod(nn.Module):
+    par(nn.Module): parent module of mod
+  Returns:
+    The ActMask module or None 
+  """
+  # locate mod in par.children
+  mods = list(par.children())
+
+  for i, mod_ in enumerate(mods):
+    if mod_ is mod:
+      if i < len(mods) - 1 and isinstance(mods[i + 1], ActMask):
+        return mods[i + 1]
+      else:
+        return None
+
+  raise ValueError('mod {} is not a children of {}.'.format(mod, par))
+
+
+def insert_or_update_act_mask(mod, par, ouc):
+  """ Insert a new ActMask after mod or update its contents.
+  
+  Args:
+    mod(nn.Module):
+    par(nn.Module): parent module of mod
+    ouc(list): a list of channel indices to be remained
+  Returns:
+    None
+  """
+  act_mask = find_act_mask(mod, par)
+  if act_mask is None:
+    num_channels = get_mod_channels(mod, out=True)
+    act_mask = ActMask(num_channels)
+
+
 def prune_by_taylor_criterion(model,
                               crit_map,
                               num_channels_per_prune=1,
@@ -322,16 +361,15 @@ def prune_by_taylor_criterion(model,
       else:
         inc = [x for x in range(in_channels) if x not in act_chl[i - 1][1]]
 
-    # create the new module
-    mod_ = clone_module(mod, len(inc), len(ouc))
-    mod_.weight.data = mod.weight[ouc, :][:, inc]  # pruned weights
-    if mod_.bias is not None:
-      mod_.bias.data = mod.bias[ouc]  # pruned biases
-
-    # replace the old module
-    par_mod = mod_map[par_map[name]]
-    par_mod._modules[name.split('.')[-1]] = mod_
-    del mod  # explicitly remove this replaced module
+    # NOTE: this is an older module replacement approach. We now prefer
+    #   adding mask modules
+    # mod_ = clone_module(mod, len(inc), len(ouc))
+    # mod_.weight.data = mod.weight[ouc, :][:, inc]  # pruned weights
+    # if mod_.bias is not None:
+    #   mod_.bias.data = mod.bias[ouc]  # pruned biases
+    # par_mod = mod_map[par_map[name]]
+    # par_mod._modules[name.split('.')[-1]] = mod_
+    # del mod  # explicitly remove this replaced module
 
   return model
 
