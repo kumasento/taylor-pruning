@@ -300,10 +300,12 @@ def prune_by_taylor_criterion(model,
     pre = mod_map[act_chl[i - 1][0]] if i > 0 else None
     assert isinstance(mod, nn.Conv2d) or isinstance(mod, nn.Linear)
 
+    # collect the number of channels from the module
+    # that outputs the current activation.
     in_channels = get_mod_channels(mod, out=False)
     out_channels = get_mod_channels(mod, out=True)
 
-    # channels will be remained
+    # decide the channels will be remained
     ouc = [x for x in range(out_channels) if x not in act_chl[i][1]]
     if i == 0:
       inc = range(in_channels)
@@ -320,13 +322,13 @@ def prune_by_taylor_criterion(model,
       else:
         inc = [x for x in range(in_channels) if x not in act_chl[i - 1][1]]
 
-    # update the model in-place
+    # create the new module
     mod_ = clone_module(mod, len(inc), len(ouc))
     mod_.weight.data = mod.weight[ouc, :][:, inc]  # pruned weights
     if mod_.bias is not None:
       mod_.bias.data = mod.bias[ouc]  # pruned biases
 
-    # NOTE: we replaced the module here
+    # replace the old module
     par_mod = mod_map[par_map[name]]
     par_mod._modules[name.split('.')[-1]] = mod_
     del mod  # explicitly remove this replaced module
